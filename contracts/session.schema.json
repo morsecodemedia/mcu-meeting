@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcu.local/contracts/session.schema.json",
+  "title": "MCU Meeting Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "session_id", "created_at", "capture", "processing", "artifacts"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "session_id": {"type": "string", "format": "uuid"},
+    "created_at": {"$ref": "#/$defs/timestamp"},
+    "capture": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "target_bundle_id", "started_at", "ended_at", "health_events"],
+      "properties": {
+        "state": {"enum": ["created", "recording", "completed", "interrupted", "failed"]},
+        "target_bundle_id": {"type": "string", "minLength": 1},
+        "started_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+        "ended_at": {"anyOf": [{"$ref": "#/$defs/timestamp"}, {"type": "null"}]},
+        "health_events": {"type": "array", "items": {"$ref": "#/$defs/health_event"}}
+      }
+    },
+    "processing": {
+      "type": "object", "additionalProperties": false,
+      "required": ["transcription", "diarization", "speaker_resolution", "knowledge_export"],
+      "properties": {
+        "transcription": {"$ref": "#/$defs/stage"},
+        "diarization": {"$ref": "#/$defs/stage"},
+        "speaker_resolution": {"$ref": "#/$defs/stage"},
+        "knowledge_export": {"$ref": "#/$defs/stage"}
+      }
+    },
+    "artifacts": {
+      "type": "array", "items": {"$ref": "#/$defs/artifact"}
+    }
+  },
+  "$defs": {
+    "timestamp": {"type": "string", "format": "date-time"},
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "attempts", "retryable", "error"],
+      "properties": {
+        "state": {"enum": ["pending", "running", "completed", "skipped", "failed"]},
+        "attempts": {"type": "integer", "minimum": 0},
+        "retryable": {"type": "boolean"},
+        "error": {"type": ["string", "null"]}
+      }
+    },
+    "health_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["at", "code", "detail"],
+      "properties": {
+        "at": {"$ref": "#/$defs/timestamp"},
+        "code": {"type": "string", "minLength": 1},
+        "detail": {"type": "string"}
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "path", "sha256"],
+      "properties": {
+        "kind": {"enum": ["application_audio", "microphone_audio", "transcript", "speaker_annotations", "knowledge_export"]},
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000]+$"},
+        "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

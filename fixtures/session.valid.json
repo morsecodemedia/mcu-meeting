@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.1.0",
+  "session_id": "4e724eb5-9279-4f7a-bd82-7cb2a197e1c4",
+  "created_at": "2026-10-18T20:00:00Z",
+  "capture": {
+    "state": "completed",
+    "target_bundle_id": "us.zoom.xos",
+    "started_at": "2026-10-18T20:00:10Z",
+    "ended_at": "2026-10-18T20:00:20Z",
+    "health_events": []
+  },
+  "processing": {
+    "transcription": {"state": "pending", "attempts": 0, "retryable": false, "error": null},
+    "diarization": {"state": "pending", "attempts": 0, "retryable": false, "error": null},
+    "speaker_resolution": {"state": "pending", "attempts": 0, "retryable": false, "error": null},
+    "knowledge_export": {"state": "pending", "attempts": 0, "retryable": false, "error": null}
+  },
+  "artifacts": [
+    {"kind": "application_audio", "path": "audio/application.wav", "sha256": null}
+  ]
+}
