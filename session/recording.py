@@ -5,6 +5,7 @@ import hashlib
 import os
 import struct
 import subprocess
+import signal
 import wave
 from pathlib import Path
 
@@ -27,7 +28,13 @@ def verify_wav(path: Path) -> str:
         if wav.getframerate() <= 0 or wav.getnchannels() <= 0 or wav.getsampwidth() not in (1, 2, 3, 4):
             raise ValueError("WAV format invalid")
         expected = wav.getnframes() * wav.getnchannels() * wav.getsampwidth()
-        if len(wav.readframes(wav.getnframes())) != expected:
+        actual = 0
+        while True:
+            frames = wav.readframes(65536)
+            if not frames:
+                break
+            actual += len(frames)
+        if actual != expected:
             raise ValueError("WAV PCM data truncated")
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -36,22 +43,57 @@ def verify_wav(path: Path) -> str:
     return digest.hexdigest()
 
 
-def record(root: Path, bundle_id: str, executable: Path, *, runner=None) -> dict:
+def _managed_capture(argv: list[str], *, stop_timeout: float = 15.0) -> subprocess.CompletedProcess:
+    """Coordinate SIGINT and child shutdown; never treat a killed child as success."""
+    child = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.PIPE, text=True)
+    interrupted = False
+    try:
+        while True:
+            try:
+                _, stderr = child.communicate(timeout=0.25)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+            except KeyboardInterrupt:
+                interrupted = True
+                child.send_signal(signal.SIGINT)
+                try:
+                    _, stderr = child.communicate(timeout=stop_timeout)
+                except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                    child.kill()
+                    _, stderr = child.communicate()
+                    raise KeyboardInterrupt('capture did not stop gracefully')
+                break
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate()
+    if interrupted and child.returncode != 0:
+        raise KeyboardInterrupt(f'capture stopped with exit {child.returncode}')
+    return subprocess.CompletedProcess(argv, child.returncode, stdout='', stderr=stderr)
+
+
+def record(root: Path, bundle_id: str, executable: Path, *, runner=None, duration: float | None = None) -> dict:
     """Create session first; never claim completion without validated audio."""
     executable = executable.expanduser().resolve()
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise ValueError(f"capture executable missing or not executable: {executable}")
+    if duration is not None and (not isinstance(duration, (int, float)) or not 0 < duration <= 86400):
+        raise ValueError("duration must be > 0 and <= 86400 seconds")
     data = manager.create(root, bundle_id)
     sid = data["session_id"]
     folder = root.expanduser() / sid
     audio = folder / "audio" / "application.wav"
     manager.transition(root, sid, "recording")
     try:
-        invoke = runner or subprocess.run
-        result = invoke(
-            [str(executable), "--bundle-id", bundle_id, "--output", str(audio)],
-            check=False, capture_output=True, text=True,
-        )
+        argv = [str(executable), "--bundle-id", bundle_id, "--output", str(audio)]
+        if duration is not None:
+            argv.extend(["--duration", str(duration)])
+        if runner is not None:
+            result = runner(argv, check=False, capture_output=True, text=True)
+        else:
+            result = _managed_capture(argv)
         if result.returncode != 0:
             raise RuntimeError(f"capture exited {result.returncode}: {(result.stderr or '')[-500:]}")
         digest = verify_wav(audio)

@@ -32,7 +32,7 @@ Then run from repository root:
 python3 -m session --sessions-dir /tmp/mcu-meeting-demo record --bundle-id com.google.Chrome
 ```
 
-`record` creates a session before launching the existing ten-second capture
+`record` creates a session before launching the managed macOS capture process
 binary. It writes `audio/application.wav`, validates PCM WAV frames, computes
 SHA-256, and atomically registers the artifact before marking capture completed.
 A nonzero exit or invalid audio marks capture failed; interruption marks it
@@ -40,3 +40,15 @@ interrupted. A crash before finalization may leave `recording`, which the
 read-only `recover` command can discover. Processing stages are not changed.
 Use `--capture-bin PATH` after `record` to select another executable. This is
 not yet a full-meeting recorder or a microphone recorder.
+
+## Long-running capture orchestration (Milestone 1.5C)
+
+Run `python3 -m session record --bundle-id com.google.Chrome --duration 30`
+for a bounded recording, or omit `--duration` and press Ctrl+C once to request
+a graceful stop. Python launches Swift in a separate process session, forwards
+SIGINT, waits up to 15 seconds for WAV finalization, and validates the artifact
+before marking the session completed. A forced kill is never successful.
+
+Python still has no automatic crash recovery or persistent capture PID registry.
+A Python crash may leave a running Swift child; inspect processes and the
+`recover` report before taking action. Do not run unattended recordings yet.
