@@ -63,3 +63,10 @@ unwritable destination. Both tests use disposable temporary files.
 The current writer is **not thread-safe** and has no explicit abort operation.
 A failed or interrupted write may leave an incomplete WAV. It is not yet
 connected to the ScreenCaptureKit callback or suitable for long recordings.
+
+## Streaming integration (Milestone 1.5B.1)
+
+The capture callback submits decoded mono frames to a five-second bounded queue.
+A serialized worker writes PCM16 incrementally. Overflow and write errors prevent
+finalization. The existing ten-second stop remains until lifecycle controls land.
+A hard process kill can leave an incomplete WAV header; recovery is pending.

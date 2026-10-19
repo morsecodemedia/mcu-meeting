@@ -5,7 +5,8 @@ import AudioToolbox
 
 final class AudioCollector: NSObject, SCStreamOutput, SCStreamDelegate {
     private let lock = NSLock()
-    private var monoSamples: [Float] = []
+    private let writeQueue: AudioWriteQueue
+    init(writeQueue: AudioWriteQueue) { self.writeQueue = writeQueue; super.init() }
     private var acceptedCallbacks = 0
     private var receivedCallbacks = 0
     private var errors: [String] = []
@@ -87,7 +88,7 @@ final class AudioCollector: NSObject, SCStreamOutput, SCStreamDelegate {
         lock.lock()
         if nativeRate == 0 { nativeRate = asbd.mSampleRate; nativeChannels = asbd.mChannelsPerFrame }
         if nativeRate == asbd.mSampleRate {
-            monoSamples.append(contentsOf: mono)
+            writeQueue.submit(mono)
             acceptedCallbacks += 1
         } else if errors.count < 10 {
             errors.append("Sample rate changed during capture; dropped callback")
@@ -102,9 +103,9 @@ final class AudioCollector: NSObject, SCStreamOutput, SCStreamDelegate {
         lock.lock(); defer { lock.unlock() }
         if errors.count < 10 { errors.append(message) }
     }
-    func finish() -> (samples: [Float], rate: Double, channels: UInt32, received: Int, accepted: Int, errors: [String]) {
+    func finish() -> (rate: Double, channels: UInt32, received: Int, accepted: Int, errors: [String]) {
         lock.lock(); defer { lock.unlock() }
-        return (monoSamples, nativeRate, nativeChannels, receivedCallbacks, acceptedCallbacks, errors)
+        return (nativeRate, nativeChannels, receivedCallbacks, acceptedCallbacks, errors)
     }
 }
 
@@ -174,7 +175,9 @@ struct CaptureTest {
                 exceptingWindows: []
             )
             print("Capture filter: \(bundleID) only")
-            let collector = AudioCollector()
+            let writer = try WAVStreamWriter(url: URL(fileURLWithPath: path), sampleRate: 48000)
+            let queue = AudioWriteQueue(writer: writer)
+            let collector = AudioCollector(writeQueue: queue)
             let stream = SCStream(filter: filter, configuration: config, delegate: collector)
             try stream.addStreamOutput(collector, type: .audio, sampleHandlerQueue: DispatchQueue(label: "mcu.capture.audio"))
             print("Capturing system audio for 10 seconds. Play non-sensitive audio now.")
@@ -185,14 +188,15 @@ struct CaptureTest {
             try await Task.sleep(nanoseconds: 300_000_000)
             let result = collector.finish()
             print("Callbacks received: \(result.received); decoded: \(result.accepted)")
-            print("Frames: \(result.samples.count); sample rate: \(result.rate); source channels: \(result.channels)")
+            print("Sample rate: \(result.rate); source channels: \(result.channels)")
             for error in result.errors { fputs("Warning: \(error)\n", stderr) }
-            guard result.samples.count > 0 else {
+            guard result.accepted > 0 && !queue.hasFailed else {
                 fputs("No usable audio captured; WAV not written.\n", stderr)
                 Foundation.exit(1)
             }
-            try writeWAV(samples: result.samples, sampleRate: Int(result.rate), path: path)
-            print("WAV written: \(path) (mono PCM16)")
+            let frames = try queue.finish()
+            guard frames > 0 else { throw NSError(domain: "MCUCapture", code: 5, userInfo: [NSLocalizedDescriptionKey: "No audio frames written"]) }
+            print("WAV written: \(path) (mono PCM16, \(frames) frames)")
         } catch {
             fputs("Capture error: \(error.localizedDescription)\n", stderr)
             Foundation.exit(1)
