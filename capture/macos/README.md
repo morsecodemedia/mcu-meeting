@@ -37,3 +37,9 @@ Grant Screen & System Audio Recording permission to the terminal host in macOS S
 - WAV output accumulates samples in memory, so this is not yet a long-meeting recorder.
 - Capture timing, interruptions, source process helpers, and long-duration reliability remain unvalidated.
 - The existing audio decoder and WAV writer were intentionally preserved in this CLI change.
+
+## Session integration
+
+The repository-root Python CLI (`python3 -m session ... record`) can launch
+this executable, validate the WAV, and register it in a durable session.
+Capture itself still runs for ten seconds; no session logic is embedded in Swift.

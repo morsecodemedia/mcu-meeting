@@ -42,4 +42,8 @@ their implementations are introduced.
 
 ## Session management (experimental)
 
-See [`session/README.md`](session/README.md) for session CLI usage, storage, and recovery semantics. Capture integration is not implemented yet.
+See [`session/README.md`](session/README.md) for session CLI usage, storage, and recovery semantics. Experimental ten-second capture integration is available; full-meeting recording remains pending.
+
+The experimental integrated ten-second recording command is documented in
+[`session/README.md`](session/README.md). It creates a durable session and
+registers the application-audio WAV only after validating it.
