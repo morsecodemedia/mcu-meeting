@@ -21,7 +21,7 @@ Other intended targets: `us.zoom.xos` (Zoom), `com.tinyspeck.slackmacgap` (Slack
 
 ## Permissions and behavior
 
-Grant Screen & System Audio Recording permission to the terminal host in macOS System Settings > Privacy & Security. Recording lasts 10 seconds and produces a mono 16-bit PCM WAV. Audio capture is application-scoped, not meeting-scoped. It does not record microphone audio, provide a durable session manifest, or run transcription. No automatic recording is implemented.
+Grant Screen & System Audio Recording permission to the terminal host in macOS System Settings > Privacy & Security. Recording continues until Ctrl+C or the optional --duration limit and produces a mono 16-bit PCM WAV. Audio capture is application-scoped, not meeting-scoped. It does not record microphone audio, provide a durable session manifest, or run transcription. No automatic recording is implemented.
 
 ## Verification gates
 
@@ -33,8 +33,8 @@ Grant Screen & System Audio Recording permission to the terminal host in macOS S
 
 ## Known limitations
 
-- Ten-second fixed capture duration; no stop command.
-- WAV output accumulates samples in memory, so this is not yet a long-meeting recorder.
+- Interactive Ctrl+C stopping and optional --duration are supported.
+- Audio is written incrementally through a bounded queue; extended-duration reliability remains unvalidated.
 - Capture timing, interruptions, source process helpers, and long-duration reliability remain unvalidated.
 - The existing audio decoder and WAV writer were intentionally preserved in this CLI change.
 
@@ -42,7 +42,7 @@ Grant Screen & System Audio Recording permission to the terminal host in macOS S
 
 The repository-root Python CLI (`python3 -m session ... record`) can launch
 this executable, validate the WAV, and register it in a durable session.
-Capture itself still runs for ten seconds; no session logic is embedded in Swift.
+Capture supports interactive stopping and optional duration; session lifecycle management remains in Python.
 
 ## Streaming writer work in progress (Milestone 1.5A)
 
@@ -70,3 +70,12 @@ The capture callback submits decoded mono frames to a five-second bounded queue.
 A serialized worker writes PCM16 incrementally. Overflow and write errors prevent
 finalization. The existing ten-second stop remains until lifecycle controls land.
 A hard process kill can leave an incomplete WAV header; recovery is pending.
+
+## Recording controls (Milestone 1.5B.2)
+
+The native executable records until Ctrl+C or an optional `--duration`
+limit (maximum 86400 seconds). A normal stop drains queued audio and
+finalizes the WAV. Hard kills can leave an incomplete WAV.
+
+Python session orchestration has not yet been updated for interactive
+recording. Use the native executable directly for these tests.

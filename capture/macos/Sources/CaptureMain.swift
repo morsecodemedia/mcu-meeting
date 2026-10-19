@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import ScreenCaptureKit
 import CoreMedia
 import AudioToolbox
@@ -130,24 +131,62 @@ func writeWAV(samples: [Float], sampleRate: Int, path: String) throws {
     try data.write(to: URL(fileURLWithPath: path), options: .atomic)
 }
 
+
+final class StopFlag {
+    private let lock = NSLock()
+    private var value = false
+
+    func request() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    var requested: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 @main
 struct CaptureTest {
     static func main() async {
         let args = Array(CommandLine.arguments.dropFirst())
         if args == ["--help"] || args == ["-h"] {
-            print("Usage: mcu-capture --bundle-id <id> --output <path.wav>")
-            print("Records 10 seconds of application audio; no display-wide fallback.")
+            print("Usage: mcu-capture --bundle-id <id> --output <path.wav> [--duration <seconds>]")
+            print("Records until Ctrl+C or --duration seconds; no display-wide fallback.")
             return
         }
-        guard args.count == 4,
-              args[0] == "--bundle-id", !args[1].isEmpty,
-              args[2] == "--output", !args[3].isEmpty,
-              args[3].lowercased().hasSuffix(".wav") else {
-            fputs("Usage: mcu-capture --bundle-id <id> --output <path.wav>\n", stderr)
+        var options: [String: String] = [:]
+        var i = 0
+        while i < args.count {
+            guard i + 1 < args.count,
+                  ["--bundle-id", "--output", "--duration"].contains(args[i]),
+                  options[args[i]] == nil else {
+                fputs("Invalid arguments\n", stderr)
+                Foundation.exit(2)
+            }
+            options[args[i]] = args[i + 1]
+            i += 2
+        }
+        guard let bundleID = options["--bundle-id"], !bundleID.isEmpty,
+              let path = options["--output"],
+              path.lowercased().hasSuffix(".wav") else {
+            fputs("Missing or invalid bundle ID/output\n", stderr)
             Foundation.exit(2)
         }
-        let bundleID = args[1]
-        let path = args[3]
+        let duration: Double?
+        if let raw = options["--duration"] {
+            guard let value = Double(raw), value.isFinite,
+                  value > 0, value <= 86400 else {
+                fputs("Invalid duration (0 < seconds <= 86400)\n", stderr)
+                Foundation.exit(2)
+            }
+            duration = value
+        } else {
+            duration = nil
+        }
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             guard let display = content.displays.first else {
@@ -180,9 +219,26 @@ struct CaptureTest {
             let collector = AudioCollector(writeQueue: queue)
             let stream = SCStream(filter: filter, configuration: config, delegate: collector)
             try stream.addStreamOutput(collector, type: .audio, sampleHandlerQueue: DispatchQueue(label: "mcu.capture.audio"))
-            print("Capturing system audio for 10 seconds. Play non-sensitive audio now.")
+            print("Capturing application audio. Press Ctrl+C to stop.")
             try await stream.startCapture()
-            try await Task.sleep(nanoseconds: 10_000_000_000)
+            // SIGINT requests a graceful stop rather than immediate termination.
+            signal(SIGINT, SIG_IGN)
+            let stopFlag = StopFlag()
+            let interrupt = DispatchSource.makeSignalSource(
+                signal: SIGINT, queue: .global()
+            )
+            interrupt.setEventHandler { stopFlag.request() }
+            interrupt.resume()
+
+            let started = ProcessInfo.processInfo.systemUptime
+            while !stopFlag.requested {
+                if let duration,
+                   ProcessInfo.processInfo.systemUptime - started >= duration {
+                    break
+                }
+                try await Task.sleep(nanoseconds: 100_000_000)
+            }
+            interrupt.cancel()
             try await stream.stopCapture()
             // Allow callbacks already queued before stop to finish.
             try await Task.sleep(nanoseconds: 300_000_000)
