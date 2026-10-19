@@ -43,3 +43,23 @@ Grant Screen & System Audio Recording permission to the terminal host in macOS S
 The repository-root Python CLI (`python3 -m session ... record`) can launch
 this executable, validate the WAV, and register it in a durable session.
 Capture itself still runs for ten seconds; no session logic is embedded in Swift.
+
+## Streaming writer work in progress (Milestone 1.5A)
+
+`Sources/WAVStreamWriter.swift` introduces an incremental mono PCM16 WAV writer.
+It is not wired into capture yet; the existing ten-second recorder is unchanged.
+A provisional WAV header is finalized on normal shutdown. Abrupt termination may
+leave an invalid header, so recovery and bounded callback-to-writer buffering are
+required before this is suitable for long meetings. Standard RIFF has a size limit.
+
+### Writer verification (Milestone 1.5A)
+
+Compile the writer with each standalone test file separately using `swiftc`;
+`Tests/` is not currently a SwiftPM test target. The smoke test checks basic
+WAV output; `WAVStreamWriterFailures.swift` checks invalid sample rates,
+empty recordings, repeated finalization, post-finalization writes, and an
+unwritable destination. Both tests use disposable temporary files.
+
+The current writer is **not thread-safe** and has no explicit abort operation.
+A failed or interrupted write may leave an incomplete WAV. It is not yet
+connected to the ScreenCaptureKit callback or suitable for long recordings.
