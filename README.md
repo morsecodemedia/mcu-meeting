@@ -39,3 +39,7 @@ The project is currently macOS-focused.
 
 Build instructions, test commands, and CLI usage will be documented as
 their implementations are introduced.
+
+## Session management (experimental)
+
+See [`session/README.md`](session/README.md) for session CLI usage, storage, and recovery semantics. Capture integration is not implemented yet.
