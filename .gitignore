@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+.env
+.env.*
+!.env.example
+*.wav
+*.aiff
+*.caf
+*.mp3
+*.m4a
+*.log
+__pycache__/
+.pytest_cache/
+.venv/
