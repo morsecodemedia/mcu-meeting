@@ -79,3 +79,22 @@ finalizes the WAV. Hard kills can leave an incomplete WAV.
 
 Python session orchestration has not yet been updated for interactive
 recording. Use the native executable directly for these tests.
+
+## Shared audio core
+
+`MCUAudioCore` is a Swift library target shared by `mcu-capture` and
+`mcu-mic-capture`.
+
+It owns `WAVStreamWriter` and `AudioWriteQueue`. Both executables depend
+on the shared target rather than maintaining duplicate audio-writing code.
+
+The WAV writer produces incremental mono PCM16 RIFF/WAV output.
+The bounded queue serializes writes outside capture callbacks and
+reports overflow or I/O failures rather than silently discarding audio.
+
+The microphone executable currently supports CoreAudio input-device
+discovery only. AVAudioEngine recording is not yet implemented.
+
+CoreAudio numeric device IDs are runtime identifiers. Device UIDs
+should be used for persistent configuration and future explicit
+microphone selection.

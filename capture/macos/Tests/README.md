@@ -3,7 +3,7 @@
 Run the isolated smoke test without executing ScreenCaptureKit:
 
 ```sh
-swiftc capture/macos/Sources/WAVStreamWriter.swift capture/macos/Tests/WAVStreamWriterSmoke.swift -o /tmp/mcu-wav-writer-smoke
+swiftc capture/macos/AudioCore/WAVStreamWriter.swift capture/macos/Tests/WAVStreamWriterSmoke.swift -o /tmp/mcu-wav-writer-smoke
 /tmp/mcu-wav-writer-smoke
 ```
 

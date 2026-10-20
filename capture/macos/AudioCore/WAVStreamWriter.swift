@@ -2,8 +2,8 @@ import Foundation
 
 /// Incremental mono PCM16 RIFF/WAV writer. Not thread-safe: callers serialize append/finalize.
 /// The output is only a valid WAV after finalize() succeeds.
-final class WAVStreamWriter {
-    enum WriterError: Error {
+public final class WAVStreamWriter {
+    public enum WriterError: Error {
         case invalidSampleRate
         case alreadyFinalized
         case emptyRecording
@@ -12,11 +12,11 @@ final class WAVStreamWriter {
 
     private let handle: FileHandle
     private let sampleRate: UInt32
-    private(set) var framesWritten: UInt64 = 0
+    public private(set) var framesWritten: UInt64 = 0
     private var finalized = false
     private static let maxDataBytes = UInt64(UInt32.max) - 36
 
-    init(url: URL, sampleRate: UInt32) throws {
+    public init(url: URL, sampleRate: UInt32) throws {
         guard sampleRate > 0, sampleRate <= UInt32.max / 2 else { throw WriterError.invalidSampleRate }
         self.sampleRate = sampleRate
         guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
@@ -27,7 +27,7 @@ final class WAVStreamWriter {
         catch { try? handle.close(); throw error }
     }
 
-    func append(_ samples: [Float]) throws {
+    public func append(_ samples: [Float]) throws {
         guard !finalized else { throw WriterError.alreadyFinalized }
         guard !samples.isEmpty else { return }
         let newBytes = UInt64(samples.count) * 2
@@ -42,7 +42,7 @@ final class WAVStreamWriter {
         framesWritten += UInt64(samples.count)
     }
 
-    func finalize() throws {
+    public func finalize() throws {
         guard !finalized else { throw WriterError.alreadyFinalized }
         guard framesWritten > 0 else { throw WriterError.emptyRecording }
         try handle.seek(toOffset: 0)

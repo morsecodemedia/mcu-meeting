@@ -1,4 +1,5 @@
 import Foundation
+import MCUAudioCore
 import Darwin
 import ScreenCaptureKit
 import CoreMedia

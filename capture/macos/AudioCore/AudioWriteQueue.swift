@@ -2,8 +2,8 @@ import Foundation
 
 /// Nonblocking bounded handoff from audio callbacks to a serialized WAV writer.
 /// Overflow and I/O errors are fatal; never silently drop audio.
-final class AudioWriteQueue {
-    enum QueueError: Error { case overflow, closed }
+public final class AudioWriteQueue {
+    public enum QueueError: Error { case overflow, closed }
     private let lock = NSLock()
     private let worker = DispatchQueue(label: "mcu.capture.wav-writer")
     private let writer: WAVStreamWriter
@@ -12,12 +12,12 @@ final class AudioWriteQueue {
     private var closed = false
     private var failure: Error?
 
-    init(writer: WAVStreamWriter, maxPendingFrames: Int = 48000 * 5) {
+    public init(writer: WAVStreamWriter, maxPendingFrames: Int = 48000 * 5) {
         self.writer = writer
         self.maxPendingFrames = maxPendingFrames
     }
 
-    func submit(_ frames: [Float]) {
+    public func submit(_ frames: [Float]) {
         lock.lock()
         if closed || failure != nil { lock.unlock(); return }
         if frames.count > maxPendingFrames - pendingFrames {
@@ -35,7 +35,7 @@ final class AudioWriteQueue {
     }
 
     /// Call only after stopping SCStream and draining its callback queue.
-    func finish() throws -> UInt64 {
+    public func finish() throws -> UInt64 {
         lock.lock(); closed = true; lock.unlock()
         worker.sync {}
         lock.lock(); let error = failure; lock.unlock()
@@ -44,7 +44,7 @@ final class AudioWriteQueue {
         return writer.framesWritten
     }
 
-    var hasFailed: Bool {
+    public var hasFailed: Bool {
         lock.lock(); defer { lock.unlock() }
         return failure != nil
     }
