@@ -179,16 +179,42 @@ enum AudioDiscovery {
 @main
 struct MicrophoneCapture {
     static func main() {
-        guard Array(CommandLine.arguments.dropFirst()) == ["devices"] else {
-            fputs("Usage: mcu-mic-capture devices\n", stderr)
+        let args = Array(CommandLine.arguments.dropFirst())
+        if args == ["devices"] {
+            do { try AudioDiscovery.printDevices() }
+            catch { fputs("Device discovery error: \(error)\n", stderr); Foundation.exit(1) }
+            return
+        }
+        if args == ["--help"] || args == ["-h"] {
+            print("Usage: mcu-mic-capture devices | record --output <path.wav> [--duration <seconds>]")
+            return
+        }
+        guard args.first == "record" else {
+            fputs("Usage: mcu-mic-capture devices | record --output <path.wav> [--duration <seconds>]\n", stderr)
             Foundation.exit(2)
         }
-
-        do {
-            try AudioDiscovery.printDevices()
-        } catch {
-            fputs("Device discovery error: \(error.localizedDescription)\n", stderr)
-            Foundation.exit(1)
+        var opts: [String: String] = [:]
+        var i = 1
+        while i < args.count {
+            guard i + 1 < args.count, ["--output", "--duration"].contains(args[i]),
+                  opts[args[i]] == nil else {
+                fputs("Invalid arguments\n", stderr); Foundation.exit(2)
+            }
+            opts[args[i]] = args[i + 1]
+            i += 2
         }
+        guard let output = opts["--output"], !output.isEmpty,
+              output.lowercased().hasSuffix(".wav") else {
+            fputs("Missing --output <path.wav>\n", stderr); Foundation.exit(2)
+        }
+        var duration: Double? = nil
+        if let raw = opts["--duration"] {
+            guard let value = Double(raw), value.isFinite, value > 0, value <= 86400 else {
+                fputs("Invalid duration (0 < seconds <= 86400)\n", stderr); Foundation.exit(2)
+            }
+            duration = value
+        }
+        do { try MicrophoneRecorder.record(output: output, duration: duration) }
+        catch { fputs("Microphone capture failed: \(error)\n", stderr); Foundation.exit(1) }
     }
 }
