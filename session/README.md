@@ -52,3 +52,14 @@ before marking the session completed. A forced kill is never successful.
 Python still has no automatic crash recovery or persistent capture PID registry.
 A Python crash may leave a running Swift child; inspect processes and the
 `recover` report before taking action. Do not run unattended recordings yet.
+
+## Experimental dual-track recording (Milestone 1.6C)
+
+Use `python3 -m session record --bundle-id us.zoom.xos --microphone --duration 15`
+for a bounded two-source recording. Omit duration and press Ctrl+C once to stop
+both children. The coordinator validates both WAVs and registers both artifacts
+before marking the session completed. If either fails, the session is failed.
+Process launch offsets are recorded in `events/capture-timing.json`; these are
+**not sample-accurate synchronization**. Device selection still uses the macOS
+default microphone. Crash recovery and long-running dual recording are unverified.
+Do not use this experimental mode as the sole recording of an important meeting.

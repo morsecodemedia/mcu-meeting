@@ -22,11 +22,17 @@ def main(argv=None) -> int:
     rec.add_argument("--bundle-id", required=True)
     rec.add_argument("--capture-bin", type=Path, default=Path("capture/macos/.build/release/mcu-capture"))
     rec.add_argument("--duration", type=float, help="Maximum recording duration in seconds; otherwise Ctrl+C to stop")
+    rec.add_argument("--microphone", action="store_true", help="Capture microphone as a separate track")
+    rec.add_argument("--microphone-bin", type=Path, default=Path("capture/macos/.build/release/mcu-mic-capture"))
     args = parser.parse_args(argv)
     try:
         if args.command == "record":
             from .recording import record
-            data = record(args.sessions_dir, args.bundle_id, args.capture_bin, duration=args.duration)
+            if args.microphone:
+                from .dual_recording import record_dual
+                data = record_dual(args.sessions_dir, args.bundle_id, args.capture_bin, args.microphone_bin, duration=args.duration)
+            else:
+                data = record(args.sessions_dir, args.bundle_id, args.capture_bin, duration=args.duration)
         elif args.command == "create":
             data = manager.create(args.sessions_dir, args.bundle_id)
         elif args.command == "inspect":
