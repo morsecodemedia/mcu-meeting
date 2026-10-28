@@ -18,9 +18,20 @@ def normalize(
     source: str,
     excerpt_start_seconds: float = 0.0,
     model_sha256: str | None = None,
+    chunk_id: str | None = None,
 ) -> dict:
     if source not in VALID_SOURCES:
         raise ValueError(f"Unsupported audio source: {source}")
+
+    if chunk_id is not None:
+        import re
+
+        pattern = rf"^{re.escape(source)}:[0-9]{{6,}}$"
+
+        if not isinstance(chunk_id, str) or not re.fullmatch(
+            pattern, chunk_id
+        ):
+            raise ValueError("Invalid chunk ID for source")
 
     if not isinstance(payload, dict):
         raise ValueError("Whisper payload must be an object")
@@ -73,7 +84,11 @@ def normalize(
         end = excerpt_start_seconds + end_ms / 1000
 
         normalized.append({
-            "id": f"{source}:{index}",
+            "id": (
+                f"{chunk_id}:{index}"
+                if chunk_id is not None
+                else f"{source}:{index}"
+            ),
             "source": source,
             "start_seconds": round(start, 6),
             "end_seconds": round(end, 6),
@@ -85,6 +100,7 @@ def normalize(
     return {
         "schema_version": 1,
         "source": source,
+        "chunk_id": chunk_id,
         "excerpt_start_seconds": excerpt_start_seconds,
         "model": {
             "type": model.get("type"),
@@ -102,6 +118,7 @@ def normalize_file(
     source: str,
     excerpt_start_seconds: float = 0.0,
     model_sha256: str | None = None,
+    chunk_id: str | None = None,
 ) -> dict:
     """Normalize Whisper JSON and publish an immutable artifact.
 
@@ -130,6 +147,7 @@ def normalize_file(
         source=source,
         excerpt_start_seconds=excerpt_start_seconds,
         model_sha256=model_sha256,
+        chunk_id=chunk_id,
     )
 
     result["provenance"] = {

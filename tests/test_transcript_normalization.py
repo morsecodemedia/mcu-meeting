@@ -80,5 +80,55 @@ class TranscriptNormalizationTests(unittest.TestCase):
             normalize({}, source="application_audio")
 
 
+    def test_chunk_aware_segment_ids(self):
+        first = normalize(
+            payload([segment(0, 1000)]),
+            source="application_audio",
+            chunk_id="application_audio:000000",
+        )
+
+        second = normalize(
+            payload([segment(0, 1000)]),
+            source="application_audio",
+            chunk_id="application_audio:000001",
+        )
+
+        self.assertNotEqual(
+            first["segments"][0]["id"],
+            second["segments"][0]["id"],
+        )
+
+    def test_chunk_meeting_relative_timestamps(self):
+        result = normalize(
+            payload([segment(2860, 5220)]),
+            source="microphone_audio",
+            chunk_id="microphone_audio:000001",
+            excerpt_start_seconds=300,
+        )
+
+        self.assertEqual(
+            result["segments"][0]["start_seconds"], 302.86
+        )
+
+    def test_chunk_source_mismatch_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize(
+                payload([]),
+                source="application_audio",
+                chunk_id="microphone_audio:000000",
+            )
+
+    def test_legacy_segment_ids_preserved(self):
+        result = normalize(
+            payload([segment(0, 1000)]),
+            source="application_audio",
+        )
+
+        self.assertEqual(
+            result["segments"][0]["id"],
+            "application_audio:0",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
