@@ -2,9 +2,9 @@
 
 ## Status
 
-Milestone 1.7B.9C.2 — proposed contract.
+Milestone 1.7B.9C.2 — implemented.
 
-Implementation and regression validation pending.
+Identity, migration, validation, and immutable publication implemented and regression-tested.
 
 ## Purpose
 
@@ -25,8 +25,8 @@ Canonical identity fields:
 - finding_type
 - chunk_id
 - segment_id
-- start_seconds
-- end_seconds
+- start_us
+- end_us
 - text
 
 The finding ID is SHA-256 of canonical JSON with sorted keys,
@@ -44,8 +44,8 @@ Canonical identity fields:
 - chunk_id
 - execution_fingerprint
 - segment_id
-- start_seconds
-- end_seconds
+- start_us
+- end_us
 - text
 
 The execution fingerprint must come from verified assembly
@@ -114,7 +114,16 @@ Migration must:
 - Review identity does not independently verify published
   transcript bytes.
 
+## Implementation boundaries
+
+- Identity generation is pure and deterministic.
+- Migration operates on supplied data; it does not independently verify filesystem evidence.
+- Review validation enforces the v2 structural contract.
+- Immutable publication uses macOS exclusive rename.
+- Only partial reviews are supported.
+- The caller must verify assembly and checkpoint provenance.
+- Structural validation does not establish reviewer authenticity or semantic correctness.
+
 ## Next
 
-Implement pure identity functions, regression tests, and
-an explicit migration of the three existing human decisions.
+Implement a read-only verified reconciliation coordinator.
