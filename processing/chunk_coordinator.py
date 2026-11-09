@@ -117,6 +117,38 @@ def execute_chunk(
     if profile is None:
         profile = WhisperProfile()
 
+    canonical_chunk(chunk)
+
+    root = Path(sessions_root).expanduser().resolve(strict=True)
+    model = Path(model_path).expanduser().resolve(strict=True)
+
+    if model.is_symlink() or not model.is_file():
+        raise ValueError("Invalid Whisper model")
+
+    with checkpoint_store(root, session_id) as store:
+        return _execute_chunk_with_store(
+            store, sessions_root, session_id, chunk, model_path,
+            profile=profile,
+            ffmpeg_binary=ffmpeg_binary,
+            whisper_binary=whisper_binary,
+        )
+
+
+def _execute_chunk_with_store(
+    store,
+    sessions_root,
+    session_id,
+    chunk,
+    model_path,
+    *,
+    profile=None,
+    ffmpeg_binary="ffmpeg",
+    whisper_binary="whisper-cli",
+):
+    """Execute one new chunk using an already-active checkpoint store."""
+    if profile is None:
+        profile = WhisperProfile()
+
     bounds = canonical_chunk(chunk)
     source = bounds["source"]
 
@@ -128,119 +160,118 @@ def execute_chunk(
     if model.is_symlink() or not model.is_file():
         raise ValueError("Invalid Whisper model")
 
-    with checkpoint_store(root, session_id) as store:
-        manifest = manager.load(root, session_id)
+    manifest = manager.load(root, session_id)
 
-        source_wav, audio_sha256 = _source_artifact(
-            manifest, source, session_dir
+    source_wav, audio_sha256 = _source_artifact(
+        manifest, source, session_dir
+    )
+
+    model_sha256 = _sha256(model)
+    ffmpeg_version = _ffmpeg_version(ffmpeg_binary)
+    engine_version = whisper_version(whisper_binary)
+
+    plan = plan_chunk_execution(
+        chunk,
+        audio_sha256=audio_sha256,
+        model_sha256=model_sha256,
+        ffmpeg_version=ffmpeg_version,
+        whisper_version=engine_version,
+        profile=profile,
+    )
+
+    fingerprint = plan["fingerprint"]
+    chunk_id = plan["chunk_id"]
+
+    # Exclusive creation refuses all existing checkpoints.
+    store.create(fingerprint, chunk_id)
+    store.transition(fingerprint, chunk_id, "running")
+
+    directory = session_dir / Path(
+        plan["artifacts"]["checkpoint"]
+    ).parent
+
+    whisper_json = directory / "whisper.json"
+    normalized_json = directory / "normalized.json"
+
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="mcu-chunk-"
+        ) as temporary:
+            extracted = Path(temporary) / "chunk.wav"
+
+            extraction = extract_chunk(
+                source_wav,
+                extracted,
+                chunk,
+                ffmpeg_binary=ffmpeg_binary,
+            )
+
+            if extraction["source_sha256"] != audio_sha256:
+                raise ValueError("Extraction source checksum mismatch")
+
+            result = run_whisper(
+                extracted,
+                model,
+                whisper_json,
+                profile=profile,
+                binary=whisper_binary,
+            )
+
+            if result["version"] != engine_version:
+                raise ValueError("Whisper version changed during execution")
+
+            if result["model_sha256"] != model_sha256:
+                raise ValueError("Whisper model checksum mismatch")
+
+            if result["input_sha256"] != extraction["output_sha256"]:
+                raise ValueError("Whisper input checksum mismatch")
+
+            normalize_file(
+                whisper_json,
+                normalized_json,
+                source=source,
+                excerpt_start_seconds=(
+                    bounds["read_start_us"] / 1000000
+                ),
+                model_sha256=model_sha256,
+                chunk_id=chunk_id,
+            )
+
+        artifacts = [
+            _artifact_record(whisper_json, "whisper_json"),
+            _artifact_record(normalized_json, "normalized_json"),
+        ]
+
+        if artifacts[0]["sha256"] != result["output_sha256"]:
+            raise ValueError("Whisper output checksum mismatch")
+
+        store.transition(
+            fingerprint,
+            chunk_id,
+            "completed",
+            artifacts=artifacts,
         )
 
-        model_sha256 = _sha256(model)
-        ffmpeg_version = _ffmpeg_version(ffmpeg_binary)
-        engine_version = whisper_version(whisper_binary)
+        store.verify(fingerprint, chunk_id)
 
-        plan = plan_chunk_execution(
-            chunk,
-            audio_sha256=audio_sha256,
-            model_sha256=model_sha256,
-            ffmpeg_version=ffmpeg_version,
-            whisper_version=engine_version,
-            profile=profile,
-        )
+        return {
+            "chunk_id": chunk_id,
+            "fingerprint": fingerprint,
+            "state": "completed",
+            "artifacts": artifacts,
+            "segments": result["segments"],
+        }
 
-        fingerprint = plan["fingerprint"]
-        chunk_id = plan["chunk_id"]
+    except Exception as exc:
+        current = store.load(fingerprint, chunk_id)
 
-        # Exclusive creation refuses all existing checkpoints.
-        store.create(fingerprint, chunk_id)
-        store.transition(fingerprint, chunk_id, "running")
-
-        directory = session_dir / Path(
-            plan["artifacts"]["checkpoint"]
-        ).parent
-
-        whisper_json = directory / "whisper.json"
-        normalized_json = directory / "normalized.json"
-
-        try:
-            with tempfile.TemporaryDirectory(
-                prefix="mcu-chunk-"
-            ) as temporary:
-                extracted = Path(temporary) / "chunk.wav"
-
-                extraction = extract_chunk(
-                    source_wav,
-                    extracted,
-                    chunk,
-                    ffmpeg_binary=ffmpeg_binary,
-                )
-
-                if extraction["source_sha256"] != audio_sha256:
-                    raise ValueError("Extraction source checksum mismatch")
-
-                result = run_whisper(
-                    extracted,
-                    model,
-                    whisper_json,
-                    profile=profile,
-                    binary=whisper_binary,
-                )
-
-                if result["version"] != engine_version:
-                    raise ValueError("Whisper version changed during execution")
-
-                if result["model_sha256"] != model_sha256:
-                    raise ValueError("Whisper model checksum mismatch")
-
-                if result["input_sha256"] != extraction["output_sha256"]:
-                    raise ValueError("Whisper input checksum mismatch")
-
-                normalize_file(
-                    whisper_json,
-                    normalized_json,
-                    source=source,
-                    excerpt_start_seconds=(
-                        bounds["read_start_us"] / 1000000
-                    ),
-                    model_sha256=model_sha256,
-                    chunk_id=chunk_id,
-                )
-
-            artifacts = [
-                _artifact_record(whisper_json, "whisper_json"),
-                _artifact_record(normalized_json, "normalized_json"),
-            ]
-
-            if artifacts[0]["sha256"] != result["output_sha256"]:
-                raise ValueError("Whisper output checksum mismatch")
-
+        if current["state"] == "running":
             store.transition(
                 fingerprint,
                 chunk_id,
-                "completed",
-                artifacts=artifacts,
+                "failed",
+                retryable=False,
+                error=f"{type(exc).__name__}: {exc}",
             )
 
-            store.verify(fingerprint, chunk_id)
-
-            return {
-                "chunk_id": chunk_id,
-                "fingerprint": fingerprint,
-                "state": "completed",
-                "artifacts": artifacts,
-                "segments": result["segments"],
-            }
-
-        except Exception as exc:
-            current = store.load(fingerprint, chunk_id)
-
-            if current["state"] == "running":
-                store.transition(
-                    fingerprint,
-                    chunk_id,
-                    "failed",
-                    retryable=False,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-
-            raise
+        raise

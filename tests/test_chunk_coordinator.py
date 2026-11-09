@@ -118,6 +118,117 @@ class ChunkCoordinatorTests(unittest.TestCase):
                 self.root, self.sid, self.chunk, self.model
             )
 
+    def test_public_validation_precedes_lock(self):
+        from unittest.mock import patch
+
+        from processing import chunk_coordinator as module
+
+        with patch.object(
+            module, "checkpoint_store",
+            side_effect=AssertionError("Lock acquired before validation"),
+        ):
+            with self.assertRaises(ValueError):
+                module.execute_chunk(
+                    self.root,
+                    self.sid,
+                    {"invalid": "chunk"},
+                    self.model,
+                )
+
+    def test_store_aware_helper_does_not_reacquire_lock(self):
+        from unittest.mock import patch
+
+        from processing import chunk_coordinator as module
+        from processing.checkpoint_store import checkpoint_store
+
+        with checkpoint_store(self.root, self.sid) as store:
+            with patch.object(
+                module, "checkpoint_store",
+                side_effect=AssertionError("Nested lock acquisition"),
+            ):
+                with self.assertRaises(ValueError):
+                    module._execute_chunk_with_store(
+                        store,
+                        self.root,
+                        self.sid,
+                        {"invalid": "chunk"},
+                        self.model,
+                    )
+
+    def test_store_aware_helper_success_under_existing_lock(self):
+        from processing import chunk_coordinator as module
+        from processing.checkpoint_store import checkpoint_store
+
+        before = manager.load(self.root, self.sid)["capture"]
+
+        with (
+            patch.object(
+                module,
+                "_ffmpeg_version",
+                return_value="9.0.1",
+            ),
+            patch.object(
+                module,
+                "whisper_version",
+                return_value="1.9.5",
+            ),
+            patch.object(
+                module,
+                "extract_chunk",
+                side_effect=self.fake_extract,
+            ) as extraction,
+            patch.object(
+                module,
+                "run_whisper",
+                side_effect=self.fake_whisper,
+            ) as whisper,
+        ):
+            with checkpoint_store(self.root, self.sid) as store:
+                with patch.object(
+                    module,
+                    "checkpoint_store",
+                    side_effect=AssertionError(
+                        "Nested processing lock acquisition"
+                    ),
+                ):
+                    result = module._execute_chunk_with_store(
+                        store,
+                        self.root,
+                        self.sid,
+                        self.chunk,
+                        self.model,
+                    )
+
+                self.assertEqual(result["state"], "completed")
+                self.assertEqual(result["chunk_id"], self.chunk["chunk_id"])
+
+                checkpoint = store.load(
+                    result["fingerprint"],
+                    result["chunk_id"],
+                )
+
+                self.assertEqual(checkpoint["state"], "completed")
+                self.assertTrue(
+                    store.verify(
+                        result["fingerprint"],
+                        result["chunk_id"],
+                    )
+                )
+
+        extraction.assert_called_once()
+        whisper.assert_called_once()
+
+        after = manager.load(self.root, self.sid)["capture"]
+        self.assertEqual(before, after)
+
+        report = discover_checkpoints(self.root, self.sid)
+
+        self.assertEqual(len(report["checkpoints"]), 1)
+        self.assertEqual(
+            report["checkpoints"][0]["classification"],
+            "verified_complete",
+        )
+
     def test_successful_execution(self):
         result = self.execute_test_chunk()
 

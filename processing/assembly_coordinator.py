@@ -37,43 +37,61 @@ def assemble_session(
         raise ValueError("Invalid session directory")
 
     with checkpoint_store(root, session_id) as store:
-        verified = _load_with_store(
-            store,
-            folder,
-            expected,
-            fingerprints,
+        return _assemble_session_with_store(
+            store, root, session_id, batch_plan, fingerprints
         )
 
-        contributions = verified["contributions"]
 
-        identity = assembly_identity(
-            batch_plan,
-            contributions,
-        )
+def _assemble_session_with_store(
+    store, sessions_root, session_id, batch_plan, fingerprints
+):
+    """Assemble verified chunks using an active checkpoint store."""
+    expected = _expected_chunks(batch_plan)
+    if not isinstance(fingerprints, dict):
+        raise ValueError("Invalid fingerprint mapping")
+    if set(fingerprints) != set(expected):
+        raise ValueError("Missing or unexpected fingerprints")
+    root = Path(sessions_root).expanduser().resolve(strict=True)
+    folder = manager._session_dir(root, session_id)
+    if folder.is_symlink() or not folder.is_dir():
+        raise ValueError("Invalid session directory")
+    verified = _load_with_store(
+        store,
+        folder,
+        expected,
+        fingerprints,
+    )
 
-        fingerprint = assembly_fingerprint(
-            batch_plan,
-            contributions,
-        )
+    contributions = verified["contributions"]
 
-        transcript = assemble_transcript(
-            batch_plan,
-            verified["chunks"],
-        )
+    identity = assembly_identity(
+        batch_plan,
+        contributions,
+    )
 
-        provenance = {
-            "schema_version": 1,
-            "session_id": session_id,
-            "assembly_fingerprint": fingerprint,
-            "identity": identity,
-        }
+    fingerprint = assembly_fingerprint(
+        batch_plan,
+        contributions,
+    )
 
-        publication = publish_assembly(
-            folder,
-            fingerprint,
-            transcript,
-            provenance,
-        )
+    transcript = assemble_transcript(
+        batch_plan,
+        verified["chunks"],
+    )
+
+    provenance = {
+        "schema_version": 1,
+        "session_id": session_id,
+        "assembly_fingerprint": fingerprint,
+        "identity": identity,
+    }
+
+    publication = publish_assembly(
+        folder,
+        fingerprint,
+        transcript,
+        provenance,
+    )
 
     return {
         "schema_version": 1,

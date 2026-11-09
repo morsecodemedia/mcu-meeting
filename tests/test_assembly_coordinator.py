@@ -112,6 +112,65 @@ class AssemblyCoordinatorTests(unittest.TestCase):
             self.fingerprints,
         )
 
+    def test_store_aware_helper_success_under_existing_lock(self):
+        from processing import assembly_coordinator as module
+
+        self.create_checkpoint()
+
+        before = manager.load(self.root, self.sid)["capture"]
+
+        with checkpoint_store(self.root, self.sid) as store:
+            with patch.object(
+                module,
+                "checkpoint_store",
+                side_effect=AssertionError(
+                    "Nested processing lock acquisition"
+                ),
+            ):
+                result = module._assemble_session_with_store(
+                    store,
+                    self.root,
+                    self.sid,
+                    self.plan,
+                    self.fingerprints,
+                )
+
+            self.assertEqual(result["state"], "assembled")
+            self.assertEqual(result["segment_count"], 0)
+
+            checkpoint = store.load(
+                self.fingerprint,
+                self.chunk_id,
+            )
+
+            self.assertEqual(checkpoint["state"], "completed")
+            self.assertTrue(
+                store.verify(self.fingerprint, self.chunk_id)
+            )
+
+        directory = Path(result["path"])
+
+        self.assertTrue(directory.is_dir())
+        self.assertTrue((directory / "transcript.json").is_file())
+        self.assertTrue((directory / "provenance.json").is_file())
+
+        provenance = json.loads(
+            (directory / "provenance.json").read_text()
+        )
+
+        self.assertEqual(
+            provenance["assembly_fingerprint"],
+            result["fingerprint"],
+        )
+
+        self.assertEqual(
+            provenance["identity"]["contributions"][0]["fingerprint"],
+            self.fingerprint,
+        )
+
+        after = manager.load(self.root, self.sid)["capture"]
+        self.assertEqual(before, after)
+
     def test_successful_publication(self):
         self.create_checkpoint()
 
