@@ -71,3 +71,29 @@ Published assemblies remain immutable.
 - Full end-to-end CLI
 - Diarization and speaker resolution
 - Meeting intelligence and knowledge export
+
+## Store-aware planning
+
+The public `plan_session_processing()` remains read-only and probes
+the coordinator lock. Its result reports `available`, `held`, or `unknown`.
+
+The internal `_plan_session_processing_with_store()` requires an active
+`CheckpointStore` supplied by its caller.
+
+The internal planner:
+
+- Must not acquire or probe the processing lock.
+- Uses `store.load()` and `store.verify()` for checkpoint access.
+- Uses the same execution fingerprints as the public planner.
+- Preserves exact checkpoint-path and symlink validation.
+- Returns `lock_status = "owned"` to indicate coordinator ownership.
+- Does not create, transition, repair, or remove checkpoints.
+
+A planning result is not execution authorization unless it was
+computed under the coordinator-owned lock.
+
+Before executing any missing chunks, the coordinator must reject
+plans containing blocked entries.
+
+Historical checkpoints with different execution fingerprints remain
+preserved and are not automatically reused.

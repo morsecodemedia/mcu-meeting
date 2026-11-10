@@ -484,6 +484,168 @@ class FilesystemProcessingPlanTests(unittest.TestCase):
             "stop",
         )
 
+    def test_store_aware_missing_checkpoint_under_owned_lock(self):
+        from unittest.mock import patch
+
+        from processing.checkpoint_store import checkpoint_store
+        from processing import processing_plan as module
+
+        before = sorted(
+            str(path.relative_to(self.folder))
+            for path in self.folder.rglob("*")
+        )
+
+        with (
+            patch(
+                "processing.chunk_coordinator._ffmpeg_version",
+                return_value="9.0.1",
+            ),
+            patch(
+                "processing.whisper_runner.whisper_version",
+                return_value="1.9.5",
+            ),
+            checkpoint_store(self.root, self.sid) as store,
+            patch(
+                "processing.chunk_discovery.inspect_coordinator_lock",
+                side_effect=AssertionError("Unexpected lock probe"),
+            ),
+        ):
+            result = module._plan_session_processing_with_store(
+                store,
+                self.root,
+                self.sid,
+                self.model,
+                chunk_seconds=1,
+                overlap_seconds=0,
+            )
+
+            self.assertEqual(result["lock_status"], "owned")
+            self.assertEqual(result["counts"]["missing"], 1)
+            self.assertEqual(result["entries"][0]["action"], "execute")
+
+        after = sorted(
+            str(path.relative_to(self.folder))
+            for path in self.folder.rglob("*")
+        )
+
+        # The checkpoint store may create its processing-lock file.
+        # Planning itself must not create checkpoint artifacts.
+        self.assertEqual(
+            [
+                item for item in before
+                if item.startswith("processing/transcription/")
+            ],
+            [
+                item for item in after
+                if item.startswith("processing/transcription/")
+            ],
+        )
+
+    def test_store_aware_verified_reuse_under_owned_lock(self):
+        import hashlib
+        import json
+
+        from unittest.mock import patch
+        from processing.checkpoint_store import checkpoint_store
+        from processing import processing_plan as module
+
+        initial = self.plan_with_versions()
+        entry = initial["entries"][0]
+        fingerprint = entry["fingerprint"]
+        chunk_id = entry["chunk_id"]
+
+        with checkpoint_store(self.root, self.sid) as store:
+            store.create(fingerprint, chunk_id)
+            store.transition(fingerprint, chunk_id, "running")
+
+            directory = (
+                self.folder
+                / "processing/transcription/application_audio/000000"
+                / fingerprint
+            )
+
+            whisper = directory / "whisper.json"
+            normalized = directory / "normalized.json"
+
+            whisper.write_text(json.dumps({"transcription": []}))
+            normalized.write_text(json.dumps({
+                "schema_version": 1,
+                "chunk_id": chunk_id,
+                "source": "application_audio",
+                "segments": [],
+            }))
+
+            artifacts = [
+                {
+                    "kind": kind,
+                    "path": file.name,
+                    "sha256": hashlib.sha256(
+                        file.read_bytes()
+                    ).hexdigest(),
+                }
+                for kind, file in (
+                    ("whisper_json", whisper),
+                    ("normalized_json", normalized),
+                )
+            ]
+
+            store.transition(
+                fingerprint,
+                chunk_id,
+                "completed",
+                artifacts=artifacts,
+            )
+
+        with (
+            patch(
+                "processing.chunk_coordinator._ffmpeg_version",
+                return_value="9.0.1",
+            ),
+            patch(
+                "processing.whisper_runner.whisper_version",
+                return_value="1.9.5",
+            ),
+            checkpoint_store(self.root, self.sid) as store,
+            patch(
+                "processing.chunk_discovery.inspect_coordinator_lock",
+                side_effect=AssertionError("Unexpected lock probe"),
+            ),
+        ):
+            with (
+                patch.object(
+                    store,
+                    "load",
+                    wraps=store.load,
+                ) as store_load,
+                patch.object(
+                    store,
+                    "verify",
+                    wraps=store.verify,
+                ) as store_verify,
+            ):
+                result = module._plan_session_processing_with_store(
+                    store,
+                    self.root,
+                    self.sid,
+                    self.model,
+                    chunk_seconds=1,
+                    overlap_seconds=0,
+                )
+
+                store_load.assert_called_once_with(
+                    fingerprint, chunk_id
+                )
+                store_verify.assert_called_once_with(
+                    fingerprint, chunk_id
+                )
+
+        self.assertEqual(result["lock_status"], "owned")
+        self.assertEqual(result["counts"]["reusable"], 1)
+        self.assertEqual(
+            result["entries"][0]["classification"],
+            "reusable",
+        )
+
     def test_missing_checkpoint_is_read_only(self):
         from unittest.mock import patch
 

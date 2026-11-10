@@ -111,6 +111,64 @@ def plan_session_processing(
     ffmpeg_binary="ffmpeg",
     whisper_binary="whisper-cli",
 ):
+    """Public read-only processing plan."""
+    return _plan_session_processing(
+        sessions_root,
+        session_id,
+        model_path,
+        profile=profile,
+        chunk_seconds=chunk_seconds,
+        overlap_seconds=overlap_seconds,
+        ffmpeg_binary=ffmpeg_binary,
+        whisper_binary=whisper_binary,
+    )
+
+
+def _plan_session_processing_with_store(
+    store,
+    sessions_root,
+    session_id,
+    model_path,
+    *,
+    profile=None,
+    chunk_seconds=300,
+    overlap_seconds=2,
+    ffmpeg_binary="ffmpeg",
+    whisper_binary="whisper-cli",
+):
+    """Plan under an externally owned checkpoint store."""
+    if store is None:
+        raise ValueError("Active checkpoint store required")
+
+    store._require_active()
+
+    return _plan_session_processing(
+        sessions_root,
+        session_id,
+        model_path,
+        profile=profile,
+        chunk_seconds=chunk_seconds,
+        overlap_seconds=overlap_seconds,
+        ffmpeg_binary=ffmpeg_binary,
+        whisper_binary=whisper_binary,
+        _store=store,
+        _lock_owned=True,
+    )
+
+
+def _plan_session_processing(
+    sessions_root,
+    session_id,
+    model_path,
+    *,
+    profile=None,
+    chunk_seconds=300,
+    overlap_seconds=2,
+    ffmpeg_binary="ffmpeg",
+    whisper_binary="whisper-cli",
+    _store=None,
+    _lock_owned=False,
+):
     """Inspect exact execution checkpoints without modifying evidence."""
 
     from pathlib import Path
@@ -168,7 +226,10 @@ def plan_session_processing(
         overlap_seconds=overlap_seconds,
     )
 
-    lock_status = inspect_coordinator_lock(folder)
+    lock_status = (
+        "owned" if _lock_owned
+        else inspect_coordinator_lock(folder)
+    )
 
     entries = []
 
@@ -216,8 +277,12 @@ def plan_session_processing(
 
             else:
                 try:
-                    checkpoint = load_checkpoint(
-                        folder, fingerprint, chunk_id
+                    checkpoint = (
+                        _store.load(fingerprint, chunk_id)
+                        if _lock_owned
+                        else load_checkpoint(
+                            folder, fingerprint, chunk_id
+                        )
                     )
                 except (OSError, ValueError, KeyError, TypeError):
                     decision = {
@@ -229,9 +294,12 @@ def plan_session_processing(
 
                     if checkpoint["state"] == "completed":
                         try:
-                            verify_artifacts(
-                                folder, fingerprint, chunk_id
-                            )
+                            if _lock_owned:
+                                _store.verify(fingerprint, chunk_id)
+                            else:
+                                verify_artifacts(
+                                    folder, fingerprint, chunk_id
+                                )
                         except (OSError, ValueError, KeyError):
                             status = "invalid"
                         else:
@@ -244,7 +312,7 @@ def plan_session_processing(
                         artifact_status=status,
                     )
 
-            if lock_status != "available":
+            if lock_status not in {"available", "owned"}:
                 decision = {
                     "classification": "blocked_unknown",
                     "action": "stop",
