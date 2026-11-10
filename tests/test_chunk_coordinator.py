@@ -155,6 +155,58 @@ class ChunkCoordinatorTests(unittest.TestCase):
                         self.model,
                     )
 
+    def test_expected_fingerprint_mismatch_creates_no_checkpoint(self):
+        from processing import chunk_coordinator as module
+        from processing.checkpoint_store import checkpoint_store
+        from processing.chunk_discovery import discover_checkpoints
+
+        before = manager.load(self.root, self.sid)["capture"]
+
+        with (
+            patch.object(
+                module, "_ffmpeg_version", return_value="9.0.1"
+            ),
+            patch.object(
+                module, "whisper_version", return_value="1.9.5"
+            ),
+            patch.object(
+                module,
+                "extract_chunk",
+                side_effect=AssertionError(
+                    "Extraction must not run on identity mismatch"
+                ),
+            ) as extraction,
+            patch.object(
+                module,
+                "run_whisper",
+                side_effect=AssertionError(
+                    "Whisper must not run on identity mismatch"
+                ),
+            ) as whisper,
+            checkpoint_store(self.root, self.sid) as store,
+        ):
+            with self.assertRaisesRegex(
+                ValueError,
+                "Execution fingerprint changed after planning",
+            ):
+                module._execute_chunk_with_store(
+                    store,
+                    self.root,
+                    self.sid,
+                    self.chunk,
+                    self.model,
+                    expected_fingerprint="f" * 64,
+                )
+
+            extraction.assert_not_called()
+            whisper.assert_not_called()
+
+        report = discover_checkpoints(self.root, self.sid)
+        self.assertEqual(report["checkpoints"], [])
+
+        after = manager.load(self.root, self.sid)["capture"]
+        self.assertEqual(before, after)
+
     def test_store_aware_helper_success_under_existing_lock(self):
         from processing import chunk_coordinator as module
         from processing.checkpoint_store import checkpoint_store

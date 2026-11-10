@@ -144,6 +144,7 @@ def _execute_chunk_with_store(
     profile=None,
     ffmpeg_binary="ffmpeg",
     whisper_binary="whisper-cli",
+    expected_fingerprint=None,
 ):
     """Execute one new chunk using an already-active checkpoint store."""
     if profile is None:
@@ -181,6 +182,14 @@ def _execute_chunk_with_store(
 
     fingerprint = plan["fingerprint"]
     chunk_id = plan["chunk_id"]
+
+    if (
+        expected_fingerprint is not None
+        and fingerprint != expected_fingerprint
+    ):
+        raise ValueError(
+            "Execution fingerprint changed after planning"
+        )
 
     # Exclusive creation refuses all existing checkpoints.
     store.create(fingerprint, chunk_id)

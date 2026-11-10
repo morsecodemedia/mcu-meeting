@@ -412,6 +412,85 @@ class AssemblyDiscoveryPublicationTests(unittest.TestCase):
         self.assertEqual(len(report["assemblies"]), 1)
         return report["assemblies"][0]
 
+    def test_store_aware_publication_verification(self):
+        import hashlib
+        from unittest.mock import patch
+
+        from processing import assembly_discovery as module
+        from processing.checkpoint_store import checkpoint_store
+
+        publication = self.publish()
+        directory = Path(publication["path"])
+
+        def digest(path):
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+
+        files = (
+            directory / "transcript.json",
+            directory / "provenance.json",
+        )
+
+        before = {path.name: digest(path) for path in files}
+
+        with checkpoint_store(self.root, self.sid) as store:
+            with (
+                patch.object(
+                    store,
+                    "load",
+                    wraps=store.load,
+                ) as store_load,
+                patch.object(
+                    store,
+                    "verify",
+                    wraps=store.verify,
+                ) as store_verify,
+                patch(
+                    "processing.chunk_discovery.inspect_coordinator_lock",
+                    side_effect=AssertionError(
+                        "Unexpected processing-lock probe"
+                    ),
+                ),
+                patch(
+                    "processing.checkpoint_store.checkpoint_store",
+                    side_effect=AssertionError(
+                        "Unexpected nested checkpoint store"
+                    ),
+                ),
+            ):
+                result = module._verify_publication_with_store(
+                    store,
+                    self.folder,
+                    directory,
+                    publication["fingerprint"],
+                    self.sid,
+                )
+
+                store_load.assert_called_once_with(
+                    self.execution_fingerprint,
+                    self.chunk_id,
+                )
+
+                store_verify.assert_called_once_with(
+                    self.execution_fingerprint,
+                    self.chunk_id,
+                )
+
+        self.assertEqual(
+            result["classification"],
+            "verified_complete",
+        )
+        self.assertEqual(
+            result["verification_level"],
+            "source_verified",
+        )
+        self.assertEqual(
+            result["transcript_state"],
+            "assembled",
+        )
+
+        after = {path.name: digest(path) for path in files}
+        self.assertEqual(before, after)
+
     def test_valid_publication(self):
         self.publish()
 

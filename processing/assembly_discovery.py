@@ -220,6 +220,29 @@ def _identity_digest(identity):
 
 
 def _verify_publication(folder, directory, fingerprint, session_id):
+    """Verify a publication through the read-only discovery path."""
+    return _verify_publication_shared(
+        folder, directory, fingerprint, session_id
+    )
+
+
+def _verify_publication_with_store(
+    store, folder, directory, fingerprint, session_id
+):
+    """Verify a publication using an active checkpoint store."""
+    if store is None:
+        raise ValueError("Active checkpoint store required")
+
+    store._require_active()
+
+    return _verify_publication_shared(
+        folder, directory, fingerprint, session_id, store=store
+    )
+
+
+def _verify_publication_shared(
+    folder, directory, fingerprint, session_id, *, store=None
+):
     provenance = _read_json(directory / "provenance.json")
     transcript = _read_json(directory / "transcript.json")
 
@@ -265,14 +288,19 @@ def _verify_publication(folder, directory, fingerprint, session_id):
         ):
             raise ValueError("Invalid contribution fingerprint")
 
-        checkpoint = load_checkpoint(
-            folder, execution, chunk_id
+        checkpoint = (
+            store.load(execution, chunk_id)
+            if store is not None
+            else load_checkpoint(folder, execution, chunk_id)
         )
 
         if checkpoint["state"] != "completed":
             raise ValueError("Incomplete contributing checkpoint")
 
-        verify_artifacts(folder, execution, chunk_id)
+        if store is not None:
+            store.verify(execution, chunk_id)
+        else:
+            verify_artifacts(folder, execution, chunk_id)
 
         matching = [
             artifact
